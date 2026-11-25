@@ -51,9 +51,10 @@ Do not add a public sign-up form. To revoke host access, delete the user's row f
 
 ## Quiz night
 
-After signing in on the tablet, the host chooses the number of questions (4–100) and creates the game. The six-digit game code is created once for that game and stays the same. Players can join from any network, choose their table on the floor plan, and wait for host approval. The MacBook leaderboard shows the code, current question, and progress. If a table answers incorrectly, its buzzer becomes available again and it can rejoin behind tables already waiting. After each question, the host selects **Complete question - next**. The app cues a reward at 25%, 50%, 75%, and 100% progress; the host records the table that receives each reward. Completing the final question ends the game automatically. The host can also choose **End game** at any time.
+After signing in on the tablet, the host chooses the number of questions (4–100) and creates the game. The six-digit game code is created once for that game and stays the same. Players can join from any network, choose their table on the floor plan, and wait for host approval. The MacBook leaderboard shows the code, current question, and progress. If a table answers incorrectly, its buzzer becomes available again and it can rejoin behind tables already waiting. At the start of the game and after every question, buzzers are closed. The host asks the question aloud, then presses **Start game** or **Activate buzzers** to open that round. A correct answer closes the buzzers until the host advances. After each question, the host selects **Complete question - next**. The app cues a reward at 25%, 50%, 75%, and 100% progress; the host records the table that receives each reward. Completing the final question ends the game automatically. The host can also choose **End game** at any time.
 
 ## Local preview
 
 From this folder, run `python3 -m http.server 8000` and open `http://localhost:8000`. Configure Supabase first for the game features to work.
+
 
