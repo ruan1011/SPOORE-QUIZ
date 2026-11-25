@@ -8,7 +8,8 @@ This is the full website project. GitHub Pages hosts the site, and Supabase hold
 - `config.js` - your Supabase project URL and public publishable key
 - `supabase/setup.sql` - database tables and secure game functions
 - `.github/workflows/pages.yml` - automatic GitHub Pages deployment
-- `spoorloos-logo.jpg` - Spoorloos logo
+- `spoorloos-wordmark.png` - Spoorloos trainwheel header wordmark
+- `spoorloos-logo.jpg` - Spoorloos background watermark
 - `floorplan.png` - clickable Garden, Stoep, Inside, H1, and H2 seating map
 
 Keep these files together in the repository. In particular, include the hidden `.github` folder.
@@ -59,6 +60,8 @@ After signing in on the tablet, the host chooses the number of questions (4–10
 ## Local preview
 
 From this folder, run `python3 -m http.server 8000` and open `http://localhost:8000`. Configure Supabase first for the game features to work.
+
+
 
 
 
