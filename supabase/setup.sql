@@ -604,3 +604,77 @@ end $$;
 revoke execute on function public.start_buzzers(text,text) from public,anon,authenticated;
 grant execute on function public.start_buzzers(text,text) to authenticated;
 
+-- Question file support: imported questions are stored per game and advanced by the host.
+create table if not exists public.room_questions (
+ room_id uuid not null references public.rooms(id) on delete cascade,
+ question_number integer not null check (question_number between 1 and 100),
+ question_text text not null check (length(trim(question_text)) between 1 and 500),
+ primary key (room_id,question_number)
+);
+alter table public.room_questions enable row level security;
+revoke all on public.room_questions from public,anon,authenticated;
+
+create or replace function public.create_game_with_questions(p_total_questions integer,p_questions jsonb)
+returns jsonb language plpgsql security definer set search_path = '' as $$
+declare v_code text; v_token text; v_id uuid; v_count integer;
+begin
+ if not public.is_authorized_host() then raise exception 'Host sign-in required'; end if;
+ if jsonb_typeof(p_questions) is distinct from 'array' then raise exception 'Question file must contain a JSON array'; end if;
+ v_count:=jsonb_array_length(p_questions);
+ if p_total_questions not between 4 and 100 or v_count<>p_total_questions then raise exception 'Question file must contain between 4 and 100 questions'; end if;
+ if exists(select 1 from jsonb_array_elements(p_questions) as q(value) where jsonb_typeof(q.value)<>'string' or length(trim(q.value#>>'{}')) not between 1 and 500) then raise exception 'Each question must be 1 to 500 characters'; end if;
+ loop v_code := (floor(random() * 900000) + 100000)::integer::text; exit when not exists (select 1 from public.rooms where join_code=v_code); end loop;
+ v_token := gen_random_uuid()::text || gen_random_uuid()::text;
+ insert into public.rooms(join_code,host_token,total_questions,question_no,questions_completed,ended,question)
+ values(v_code,v_token,p_total_questions,1,0,false,trim(p_questions->>0)) returning id into v_id;
+ insert into public.room_questions(room_id,question_number,question_text)
+ select v_id,ord::integer,trim(q.value) from jsonb_array_elements_text(p_questions) with ordinality as q(value,ord);
+ insert into public.scores(room_id,table_name)
+ select v_id,'Garden '||n from generate_series(1,24) seq(n)
+ union all select v_id,'Stoep '||n from generate_series(1,9) seq(n)
+ union all select v_id,'Inside '||n from generate_series(1,17) seq(n)
+ union all select v_id,'H'||n from generate_series(1,2) seq(n);
+ insert into public.reward_milestones(room_id,milestone,question_number)
+ select v_id,m,ceil(p_total_questions::numeric*m/4)::integer from generate_series(1,4) as seq(m);
+ return jsonb_build_object('code',v_code,'hostToken',v_token,'totalQuestions',p_total_questions,'importedQuestions',true);
+end $$;
+
+create or replace function public.get_game(p_code text)
+returns jsonb language plpgsql security definer set search_path = '' as $$
+declare v_room public.rooms%rowtype;
+begin
+ select * into v_room from public.rooms where join_code=upper(trim(p_code));
+ if not found then raise exception 'Game code not found'; end if;
+ return jsonb_build_object(
+  'question',v_room.question,'round',v_room.round,'roundClosed',v_room.round_closed,'buzzersOpen',v_room.buzzers_open,
+  'questionNo',v_room.question_no,'totalQuestions',v_room.total_questions,
+  'questionsCompleted',v_room.questions_completed,'ended',v_room.ended,
+  'importedQuestions',exists(select 1 from public.room_questions q where q.room_id=v_room.id),
+  'players',coalesce((select jsonb_agg(jsonb_build_object('id',p.id,'name',p.name,'table',p.table_name,'approved',p.approved) order by p.created_at) from public.players p where p.room_id=v_room.id),'[]'::jsonb),
+  'buzzes',coalesce((select jsonb_agg(jsonb_build_object('id',b.player_id,'name',p.name,'table',b.table_name,'resolved',b.resolved,'isCorrect',b.is_correct) order by b.buzzed_at,b.id) from public.buzzes b join public.players p on p.id=b.player_id where b.room_id=v_room.id and b.round=v_room.round),'[]'::jsonb),
+  'scores',coalesce((select jsonb_agg(jsonb_build_object('table',s.table_name,'points',s.points) order by s.table_name) from public.scores s where s.room_id=v_room.id),'[]'::jsonb),
+  'rewards',coalesce((select jsonb_agg(jsonb_build_object('milestone',m.milestone,'question',m.question_number,'awardedTo',m.awarded_to) order by m.milestone) from public.reward_milestones m where m.room_id=v_room.id),'[]'::jsonb));
+end $$;
+
+create or replace function public.next_question(p_code text,p_host_token text)
+returns boolean language plpgsql security definer set search_path = '' as $$
+declare v_room public.rooms%rowtype; v_completed integer; v_next_question text;
+begin
+ if not public.is_authorized_host() then raise exception 'Host sign-in required'; end if;
+ select * into v_room from public.rooms where join_code=upper(trim(p_code)) and host_token=p_host_token for update;
+ if not found then raise exception 'Host session is invalid'; end if;
+ if v_room.ended then raise exception 'The game has already ended'; end if;
+ if exists(select 1 from public.buzzes where room_id=v_room.id and round=v_room.round and not resolved) then raise exception 'Resolve the current buzzer queue before advancing'; end if;
+ v_completed:=v_room.question_no;
+ if v_completed>=v_room.total_questions then
+   update public.rooms set questions_completed=v_completed,ended=true,round_closed=true,buzzers_open=false where id=v_room.id;
+ else
+   select q.question_text into v_next_question from public.room_questions q where q.room_id=v_room.id and q.question_number=v_completed+1;
+   update public.rooms set questions_completed=v_completed,question_no=v_completed+1,round=round+1,round_closed=false,buzzers_open=false,question=coalesce(v_next_question,'') where id=v_room.id;
+ end if;
+ return true;
+end $$;
+
+revoke execute on function public.create_game_with_questions(integer,jsonb) from public,anon,authenticated;
+grant execute on function public.create_game_with_questions(integer,jsonb) to authenticated;
+
