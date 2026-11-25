@@ -512,4 +512,95 @@ grant execute on function public.buzz(text,text) to anon;
 grant execute on function public.resolve_buzz(text,text,boolean,integer) to authenticated;
 grant execute on function public.next_question(text,text) to authenticated;
 grant execute on function public.end_game(text,text) to authenticated;
-grant execute on function public.mark_reward_given(text,text,integer,text) to authenticated;
+grant execute on function public.mark_reward_given(text,text,integer,text) to authenticated;-- Each question starts with buzzers closed. The host opens the floor after reading it.
+alter table public.rooms add column if not exists buzzers_open boolean not null default false;
+
+create or replace function public.get_game(p_code text)
+returns jsonb language plpgsql security definer set search_path = '' as $$
+declare v_room public.rooms%rowtype;
+begin
+ select * into v_room from public.rooms where join_code=upper(trim(p_code));
+ if not found then raise exception 'Game code not found'; end if;
+ return jsonb_build_object(
+  'question',v_room.question,'round',v_room.round,'roundClosed',v_room.round_closed,'buzzersOpen',v_room.buzzers_open,
+  'questionNo',v_room.question_no,'totalQuestions',v_room.total_questions,
+  'questionsCompleted',v_room.questions_completed,'ended',v_room.ended,
+  'players',coalesce((select jsonb_agg(jsonb_build_object('id',p.id,'name',p.name,'table',p.table_name,'approved',p.approved) order by p.created_at) from public.players p where p.room_id=v_room.id),'[]'::jsonb),
+  'buzzes',coalesce((select jsonb_agg(jsonb_build_object('id',b.player_id,'name',p.name,'table',b.table_name,'resolved',b.resolved,'isCorrect',b.is_correct) order by b.buzzed_at,b.id) from public.buzzes b join public.players p on p.id=b.player_id where b.room_id=v_room.id and b.round=v_room.round),'[]'::jsonb),
+  'scores',coalesce((select jsonb_agg(jsonb_build_object('table',s.table_name,'points',s.points) order by s.table_name) from public.scores s where s.room_id=v_room.id),'[]'::jsonb),
+  'rewards',coalesce((select jsonb_agg(jsonb_build_object('milestone',m.milestone,'question',m.question_number,'awardedTo',m.awarded_to) order by m.milestone) from public.reward_milestones m where m.room_id=v_room.id),'[]'::jsonb));
+end $$;
+
+create or replace function public.buzz(p_code text,p_player_token text)
+returns boolean language plpgsql security definer set search_path = '' as $$
+declare v_room public.rooms%rowtype; v_player public.players%rowtype;
+begin
+ select * into v_room from public.rooms where join_code=upper(trim(p_code)) for update;
+ if not found then raise exception 'Game code not found'; end if;
+ if v_room.ended or v_room.round_closed or not v_room.buzzers_open then raise exception 'Buzzers are closed'; end if;
+ select * into v_player from public.players where player_token=p_player_token and room_id=v_room.id;
+ if not found or not v_player.approved then raise exception 'Player is waiting for host approval'; end if;
+ insert into public.buzzes(room_id,round,player_id,table_name) values(v_room.id,v_room.round,v_player.id,v_player.table_name) on conflict(room_id,round,table_name) do nothing;
+ return true;
+end $$;
+
+create or replace function public.start_buzzers(p_code text,p_host_token text)
+returns boolean language plpgsql security definer set search_path = '' as $$
+begin
+ if not public.is_authorized_host() then raise exception 'Host sign-in required'; end if;
+ update public.rooms set buzzers_open=true
+ where join_code=upper(trim(p_code)) and host_token=p_host_token and not ended and not round_closed and not buzzers_open;
+ if not found then raise exception 'Host session is invalid or buzzers are already active or this question is complete'; end if;
+ return true;
+end $$;
+
+create or replace function public.next_question(p_code text,p_host_token text)
+returns boolean language plpgsql security definer set search_path = '' as $$
+declare v_room public.rooms%rowtype; v_completed integer;
+begin
+ if not public.is_authorized_host() then raise exception 'Host sign-in required'; end if;
+ select * into v_room from public.rooms where join_code=upper(trim(p_code)) and host_token=p_host_token for update;
+ if not found then raise exception 'Host session is invalid'; end if;
+ if v_room.ended then raise exception 'The game has already ended'; end if;
+ if exists(select 1 from public.buzzes where room_id=v_room.id and round=v_room.round and not resolved) then raise exception 'Resolve the current buzzer queue before advancing'; end if;
+ v_completed:=v_room.question_no;
+ if v_completed>=v_room.total_questions then
+   update public.rooms set questions_completed=v_completed,ended=true,round_closed=true,buzzers_open=false where id=v_room.id;
+ else
+   update public.rooms set questions_completed=v_completed,question_no=v_completed+1,round=round+1,round_closed=false,buzzers_open=false,question='' where id=v_room.id;
+ end if;
+ return true;
+end $$;
+
+create or replace function public.end_game(p_code text,p_host_token text)
+returns boolean language plpgsql security definer set search_path = '' as $$
+begin
+ if not public.is_authorized_host() then raise exception 'Host sign-in required'; end if;
+ update public.rooms set ended=true,round_closed=true,buzzers_open=false where join_code=upper(trim(p_code)) and host_token=p_host_token and not ended;
+ if not found then raise exception 'Host session is invalid or the game has already ended'; end if;
+ return true;
+end $$;
+
+create or replace function public.resolve_buzz(p_code text,p_host_token text,p_correct boolean,p_points integer)
+returns boolean language plpgsql security definer set search_path = '' as $$
+declare v_room public.rooms%rowtype; v_buzz public.buzzes%rowtype;
+begin
+ if not public.is_authorized_host() then raise exception 'Host sign-in required'; end if;
+ if p_points not in (1,2,3,5) then raise exception 'Choose a valid point amount'; end if;
+ select * into v_room from public.rooms where join_code=upper(trim(p_code)) and host_token=p_host_token for update;
+ if not found then raise exception 'Host session is invalid'; end if;
+ select * into v_buzz from public.buzzes where room_id=v_room.id and round=v_room.round and not resolved order by buzzed_at,id limit 1 for update;
+ if not found then raise exception 'No table is waiting to answer'; end if;
+ if p_correct then
+   update public.buzzes set resolved=true,is_correct=true where id=v_buzz.id;
+   update public.scores set points=points+p_points where room_id=v_room.id and table_name=v_buzz.table_name;
+   update public.rooms set round_closed=true,buzzers_open=false where id=v_room.id;
+ else
+   delete from public.buzzes where id=v_buzz.id;
+ end if;
+ return true;
+end $$;
+
+revoke execute on function public.start_buzzers(text,text) from public,anon,authenticated;
+grant execute on function public.start_buzzers(text,text) to authenticated;
+
