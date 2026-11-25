@@ -16,7 +16,7 @@ Keep these files together in the repository. In particular, include the hidden `
 ## Step 1: Create the Supabase database
 
 1. Create a project at [Supabase](https://supabase.com/).
-2. In the project dashboard, open **SQL Editor** and run the contents of `supabase/setup.sql`.
+2. In the project dashboard, open **SQL Editor** and run the full contents of `supabase/setup.sql`. Re-run the updated file whenever this project adds database changes.
 3. Open **Project Settings > API Keys**. Copy the **Project URL** and **Publishable key**.
 4. Open `config.js` in a text editor and replace `https://YOUR-PROJECT.supabase.co` and `YOUR-SUPABASE-PUBLISHABLE-KEY` with those values.
 
@@ -38,10 +38,22 @@ The publishable key is meant to appear in browser code. Do not put a Supabase se
 
 Every push to the `main` branch will publish the latest site automatically.
 
+## Set up host sign-in
+
+Only Supabase accounts explicitly added to `public.quiz_hosts` can open host controls.
+
+1. In Supabase, open **Authentication > Users** and add the host with their email and a password.
+2. Copy the new user's UUID from the Users list.
+3. In **SQL Editor**, run `insert into public.quiz_hosts (user_id) values ('PASTE-USER-UUID-HERE');` using that UUID.
+4. On the host tablet, choose **Open host controls** and sign in with that account.
+
+Do not add a public sign-up form. To revoke host access, delete the user's row from `public.quiz_hosts`.
+
 ## Quiz night
 
-Open the published address on the host tablet and choose **Open host controls** to create a game. Share the six-digit code with players. The host can copy a separate leaderboard link to open on the MacBook. Players open the same site, enter the code, and tap their numbered table on the floor plan.
+The signed-in host creates the game on the tablet and shares the six-digit code with players. Players can open the same site from any network, enter the code, choose their table on the floor plan, and wait for approval. The host shares the leaderboard link to the MacBook; its display includes the game code and current question. The host screen shows the first table in the buzz queue. After each response, select the points and mark the answer correct or incorrect. Incorrect answers advance to the next table that buzzed; a correct answer awards points and closes that round. Start a new round for the next question.
 
 ## Local preview
 
 From this folder, run `python3 -m http.server 8000` and open `http://localhost:8000`. Configure Supabase first for the game features to work.
+
