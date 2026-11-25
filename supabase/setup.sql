@@ -310,10 +310,13 @@ begin
  if not found then raise exception 'Host session is invalid'; end if;
  select * into v_buzz from public.buzzes where room_id=v_room.id and round=v_room.round and not resolved order by buzzed_at,id limit 1 for update;
  if not found then raise exception 'No table is waiting to answer'; end if;
- update public.buzzes set resolved=true,is_correct=p_correct where id=v_buzz.id;
  if p_correct then
+   update public.buzzes set resolved=true,is_correct=true where id=v_buzz.id;
    update public.scores set points=points+p_points where room_id=v_room.id and table_name=v_buzz.table_name;
    update public.rooms set round_closed=true where id=v_room.id;
+ else
+   -- Remove the missed table from the active queue. It can buzz again and rejoins at the back.
+   delete from public.buzzes where id=v_buzz.id;
  end if;
  return true;
 end $$;
