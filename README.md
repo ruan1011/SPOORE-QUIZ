@@ -51,7 +51,7 @@ Do not add a public sign-up form. To revoke host access, delete the user's row f
 
 ## Quiz night
 
-The signed-in host creates the game on the tablet and shares the six-digit code with players. Players can open the same site from any network, enter the code, choose their table on the floor plan, and wait for approval. The host shares the leaderboard link to the MacBook; its display includes the game code and current question. The host screen shows the first table in the buzz queue. After each response, select the points and mark the answer correct or incorrect. Incorrect answers advance to the next table that buzzed; a correct answer awards points and closes that round. Start a new round for the next question.
+After signing in on the tablet, the host chooses the number of questions (4–100) and creates the game. The six-digit game code is created once for that game and stays the same. Players can join from any network, choose their table on the floor plan, and wait for host approval. The MacBook leaderboard shows the code, current question, and progress. After each question, the host selects **Complete question - next**. The app cues a reward at 25%, 50%, 75%, and 100% progress; the host records the table that receives each reward. Completing the final question ends the game automatically. The host can also choose **End game** at any time.
 
 ## Local preview
 
